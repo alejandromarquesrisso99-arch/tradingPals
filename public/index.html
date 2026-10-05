@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Parqué Relámpago</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one-screen trading floor. Header strip with the bell clock, chart dominant on the left with volume and tape, order ticket and room on the right. Dark-first. */
+:root{
+  --bg:#0c121d; --panel:#131b2a; --panel2:#1a2436; --line:#243048;
+  --fg:#e5eaf3; --muted:#8692aa;
+  --up:#2fbf9b; --down:#ef6a5e; --accent:#e5b04b; --on-signal:#07130f;
+  --grid:rgba(134,146,170,.13);
+  --display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#edf0f5; --panel:#ffffff; --panel2:#f3f5f9; --line:#d7dde8;
+    --fg:#131a29; --muted:#5b6680;
+    --up:#0f8a6b; --down:#d3433a; --accent:#a06800; --on-signal:#ffffff;
+    --grid:rgba(19,26,41,.08);
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#edf0f5; --panel:#ffffff; --panel2:#f3f5f9; --line:#d7dde8;
+  --fg:#131a29; --muted:#5b6680;
+  --up:#0f8a6b; --down:#d3433a; --accent:#a06800; --on-signal:#ffffff;
+  --grid:rgba(19,26,41,.08);
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--body);padding-inline:16px;padding-block:12px 24px}
+.app{max-width:1400px;margin:0 auto;display:grid;gap:12px}
+.up{color:var(--up)} .down{color:var(--down)} .muted{color:var(--muted)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* Header */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 28px}
+.brand{font-family:var(--display);font-weight:800;font-size:19px;letter-spacing:-.015em;display:flex;align-items:center;gap:9px;white-space:nowrap}
+.bell{width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}
+.net{font:400 11px var(--mono);letter-spacing:0;color:var(--muted);display:flex;align-items:center;gap:6px;margin-left:6px}
+.net i{width:7px;height:7px;border-radius:50%;background:var(--up)}
+.net.off i{background:var(--down)}
+.quote{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
+.tkr{font:600 12px var(--mono);padding:2px 7px;border:1px solid var(--line);border-radius:4px;letter-spacing:.08em;align-self:center}
+.co{color:var(--muted);font-size:12px}
+.px{font:600 24px var(--mono);font-variant-numeric:tabular-nums}
+.chg{font:500 13px var(--mono)}
+.clock{margin-left:auto;display:flex;align-items:center;gap:12px}
+.clock .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);text-align:right;line-height:1.35}
+.clock .t{font:600 38px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--accent)}
+.clock.closing .t{color:var(--down)}
+@media (prefers-reduced-motion:no-preference){.clock.closing .t{animation:blink 1s steps(2) infinite}}
+@keyframes blink{50%{opacity:.55}}
+.me{display:grid;gap:1px;text-align:right;padding-left:18px;border-left:1px solid var(--line)}
+.me .k{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.me .v{font:600 18px var(--mono);font-variant-numeric:tabular-nums}
+
+/* Floor grid */
+.floor{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;align-items:start}
+.col{display:grid;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;min-width:0}
+.card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
+.card-h h2{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--fg);margin:0;font-weight:600}
+.next{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px}
+.next .track{width:60px;height:3px;background:var(--panel2);border-radius:2px;overflow:hidden}
+.next .track i{display:block;height:100%;background:var(--muted)}
+
+.chart-wrap{position:relative;height:clamp(380px,60vh,640px)}
+#chart{display:block;width:100%;height:100%}
+.toast{position:absolute;left:12px;top:10px;right:84px;max-width:560px;padding:9px 12px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.banner{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);padding:7px 12px;border-radius:999px;background:var(--down);color:var(--on-signal);font:600 12px var(--body)}
+
+.pressure{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:10px 14px;border-top:1px solid var(--line);font:12px var(--mono);font-variant-numeric:tabular-nums}
+.pbar{position:relative;height:10px;background:var(--panel2);border-radius:5px;overflow:hidden}
+.pbar .fill{position:absolute;top:0;bottom:0;transition:width .18s linear}
+.pbar .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--muted)}
+.plabel{grid-column:1 / -1;text-align:center;color:var(--muted);font-family:var(--body);font-size:12px;margin-top:-4px}
+
+/* Ticket */
+.ticket{padding:14px;display:grid;gap:14px}
+.posgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.kv .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.kv .v{font:500 15px var(--mono);font-variant-numeric:tabular-nums}
+.field-l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.sizes{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.chip{font:600 12px var(--mono);padding:8px 0;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--fg);cursor:pointer}
+.chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--panel))}
+.sides{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{font:600 16px var(--body);border:0;border-radius:8px;padding:14px 8px;cursor:pointer;display:grid;gap:1px;justify-items:center;align-content:center}
+.btn small{font:500 11px var(--mono);opacity:.7}
+.buy{background:var(--up);color:var(--on-signal)}
+.sell{background:var(--down);color:var(--on-signal)}
+.ghost{background:transparent;border:1px solid var(--line);color:var(--fg);font-size:14px;padding:10px;grid-auto-flow:column;gap:8px}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.btn:not(:disabled):active{transform:translateY(1px)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.msg{min-height:1.45em;font-size:12px;color:var(--muted)}
+
+/* Ranking / roster */
+.rank{list-style:none;margin:0;padding:6px 0}
+.rank li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:3px 10px;align-items:center;padding:6px 14px}
+.rank li.you{background:color-mix(in srgb,var(--accent) 11%,transparent)}
+.rank .n{font:12px var(--mono);color:var(--muted)}
+.rank .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank li.you .nm{color:var(--accent);font-weight:600}
+.rank .pl{font:500 13px var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+.rank .bar{grid-column:2 / 4;height:3px;background:var(--panel2);border-radius:2px;position:relative;overflow:hidden}
+.rank .bar i{position:absolute;top:0;bottom:0}
+.mini{font:600 10px var(--mono);color:var(--muted);margin-left:6px;letter-spacing:.04em}
+.mini.warn{color:var(--down)} .mini.ok{color:var(--up)} .mini.acc{color:var(--accent)}
+
+/* Tape */
+.tape{list-style:none;margin:0;padding:4px 0;max-height:220px;overflow:auto;font-size:13px}
+.tape li{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;padding:5px 14px;align-items:baseline}
+.tape .tm{font:11px var(--mono);color:var(--muted)}
+.tape li.mine{background:color-mix(in srgb,var(--accent) 9%,transparent)}
+.tag{font:600 10px var(--mono);letter-spacing:.06em;padding:1px 5px;border-radius:3px;margin-right:6px;border:1px solid currentColor;white-space:nowrap}
+.tag.rumor{color:var(--accent)}
+
+/* Overlays */
+.overlay{position:absolute;inset:0;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,var(--bg) 70%,transparent);backdrop-filter:blur(3px);overflow:auto}
+.sheet{width:min(460px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;display:grid;gap:14px;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.sheet h2{font-family:var(--display);font-weight:800;font-size:30px;margin:0;line-height:1.02;letter-spacing:-.025em;text-wrap:balance}
+.sheet p{margin:0;color:var(--muted)}
+.sheet ul.rules{margin:0;padding-left:18px;color:var(--muted);font-size:13px;display:grid;gap:4px}
+.sheet ul.rules b{color:var(--fg);font-weight:600}
+.eyebrow{font:600 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.row2{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:10px;align-items:end}
+.inp label{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+.inp input,.inp select,select.plain{width:100%;font:15px var(--body);padding:9px 10px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--fg)}
+#joinCode{font-family:var(--mono);letter-spacing:.2em;text-transform:uppercase}
+.go{background:var(--accent);color:var(--on-signal);font-family:var(--display);font-weight:800;font-size:18px;letter-spacing:-.01em}
+.go[aria-pressed="true"]{background:var(--up)}
+.results{width:100%;border-collapse:collapse;font-size:13px}
+.results td{padding:5px 4px;border-bottom:1px solid var(--line)}
+.results td:last-child,.results td:nth-child(3){text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.results tr.you td{color:var(--accent);font-weight:600}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.roster{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+.roster li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 10px;border-radius:6px;background:var(--panel2)}
+.roster li.you{outline:1px solid var(--accent)}
+.codebox{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px dashed var(--line);border-radius:8px}
+.codebox span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.codebox b{font:600 22px var(--mono);letter-spacing:.2em;flex:1}
+.codebox button{font:600 12px var(--body);padding:7px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--fg);cursor:pointer}
+.divider{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
+
+@media (max-width:920px){
+  .floor{grid-template-columns:minmax(0,1fr)}
+  .clock{margin-left:0}
+}
+@media (max-width:520px){
+  .me{border-left:0;padding-left:0;text-align:left}
+  .clock .t{font-size:30px}
+  .chart-wrap{height:520px}
+  .row2{grid-template-columns:minmax(0,1fr)}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><span class="bell" aria-hidden="true"></span>Parqué Relámpago
+      <div class="net off" id="net"><i></i><span id="netTxt">Conectando…</span></div>
+    </div>
+    <div class="quote">
+      <span class="tkr">NOVA</span>
+      <span class="px" id="px">—</span>
+      <span class="chg" id="chg"></span>
+      <span class="co">Nebulosa Minera S.A. · valor simulado</span>
+    </div>
+    <div class="clock" id="clock">
+      <div class="lbl" id="clockLbl">Sin sala</div>
+      <div class="t" id="timer">—:—</div>
+    </div>
+    <div class="me">
+      <span class="k">Tu patrimonio</span>
+      <span class="v" id="myEq">10.000 $</span>
+      <span class="num" id="myPnl" style="font-size:12px">+0,00 %</span>
+    </div>
+  </header>
+
+  <main class="floor">
+    <div class="col">
+      <section class="card" aria-label="Gráfico de NOVA">
+        <div class="card-h">
+          <h2>Velas de 5 s · volumen</h2>
+          <div class="next"><span id="nextTxt"></span><span class="track"><i id="nextBar"></i></span></div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="chart"></canvas>
+          <div class="toast" id="toast" hidden></div>
+          <div class="banner" id="offline" hidden>Sin conexión con el servidor. Reintentando…</div>
+
+          <!-- Not in a room yet -->
+          <div class="overlay" id="menu">
+            <form class="sheet" id="menuForm">
+              <h2>Gana más que la sala en 5 minutos</h2>
+              <p>Hasta 8 jugadores por sala, empezando con 10.000 $ cada uno. Los huecos libres los ocupan bots.</p>
+              <ul class="rules">
+                <li><b>Tus órdenes mueven el precio</b> para todos. Cuanto más grande la orden, peor precio medio pagas.</li>
+                <li><b>Lee el volumen:</b> las barras de arriba son dinero que entra y las de abajo, dinero que sale.</li>
+                <li><b>Vender sin acciones abre un corto.</b> Sin apalancamiento: máximo el 100 % de tu patrimonio.</li>
+                <li><b>El cierre</b> se liquida al precio medio de los últimos 30 s.</li>
+              </ul>
+              <div class="inp"><label for="playerName">Tu nombre</label><input id="playerName" maxlength="18" autocomplete="off" placeholder="Cómo te verán los demás"></div>
+              <button class="btn go" type="submit" id="quickBtn">Partida rápida</button>
+              <div class="divider">o juega con amigos</div>
+              <div class="row2">
+                <div class="inp"><label for="joinCode">Código de sala</label><input id="joinCode" maxlength="4" autocomplete="off" placeholder="ABCD"></div>
+                <button class="btn ghost" type="button" id="joinBtn">Unirse</button>
+              </div>
+              <button class="btn ghost" type="button" id="createBtn">Crear sala privada</button>
+              <div class="msg down" id="menuMsg" aria-live="polite"></div>
+            </form>
+          </div>
+
+          <!-- In a room, waiting for the bell -->
+          <div class="overlay" id="roomLobby" hidden>
+            <div class="sheet">
+              <div class="eyebrow" id="roomKind">Sala pública</div>
+              <h2 id="roomTitle">Esperando jugadores</h2>
+              <p id="roomStatus"></p>
+              <ul class="roster" id="roster"></ul>
+              <div class="codebox" id="codeBox"><span>Código</span><b id="roomCode">----</b><button type="button" id="copyBtn">Copiar enlace</button></div>
+              <div class="row2" id="hostRow">
+                <div class="inp"><label for="roomMins">Duración</label>
+                  <select id="roomMins"><option value="1">1 min</option><option value="3">3 min</option><option value="5">5 min</option></select>
+                </div>
+                <button class="btn ghost" type="button" id="hostStartBtn">Empezar ya</button>
+              </div>
+              <div class="btns">
+                <button class="btn go" type="button" id="readyBtn" aria-pressed="false">Estoy listo</button>
+                <button class="btn ghost" type="button" id="leaveBtn">Salir</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Results -->
+          <div class="overlay" id="results" hidden>
+            <div class="sheet">
+              <h2 id="resTitle"></h2>
+              <p id="resSub"></p>
+              <table class="results"><tbody id="resBody"></tbody></table>
+              <p id="resBack"></p>
+              <button class="btn ghost" type="button" id="resLeaveBtn">Salir de la sala</button>
+            </div>
+          </div>
+        </div>
+        <div class="pressure">
+          <span class="up" id="inTxt">Entra 0 $</span>
+          <div class="pbar" aria-hidden="true"><div class="fill" id="pFill"></div><div class="mid"></div></div>
+          <span class="down" id="outTxt">Sale 0 $</span>
+          <div class="plabel" id="pLabel">Flujo de los últimos 10 s</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-h"><h2>Cinta</h2><span>noticias y órdenes grandes, anónimas</span></div>
+        <ul class="tape" id="tape"></ul>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card ticket" aria-label="Operar">
+        <div class="posgrid">
+          <div class="kv"><div class="k">Posición</div><div class="v" id="posTxt">Sin posición</div></div>
+          <div class="kv"><div class="k">Precio medio</div><div class="v" id="avgTxt">—</div></div>
+          <div class="kv"><div class="k">Resultado abierto</div><div class="v" id="upnlTxt">—</div></div>
+          <div class="kv"><div class="k">Efectivo</div><div class="v" id="cashTxt">10.000 $</div></div>
+        </div>
+        <div>
+          <div class="field-l">Tamaño de la orden · % de tu patrimonio</div>
+          <div class="sizes">
+            <button class="chip" type="button" data-size="0.25" aria-pressed="false">25 % · 1</button>
+            <button class="chip" type="button" data-size="0.5" aria-pressed="true">50 % · 2</button>
+            <button class="chip" type="button" data-size="1" aria-pressed="false">100 % · 3</button>
+          </div>
+        </div>
+        <div class="sides">
+          <button class="btn buy" type="button" id="buyBtn">Comprar<small>tecla C</small></button>
+          <button class="btn sell" type="button" id="sellBtn">Vender<small>tecla V</small></button>
+        </div>
+        <button class="btn ghost" type="button" id="closeBtn">Cerrar posición <small>X</small></button>
+        <div class="msg" id="msg" aria-live="polite"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-h"><h2 id="sideTitle">Sala</h2><span id="roomTxt"></span></div>
+        <ol class="rank" id="rank"></ol>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let CFG = { tickMs: 200, candleTicks: 25, startCash: 10000, closeTicks: 150 };
+
+const grp = n => String(Math.round(Math.abs(n))).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+const money = n => (n < -0.5 ? '−' : '') + grp(n) + ' $';
+const smoney = n => (n >= 0 ? '+' : '−') + grp(n) + ' $';
+const dec = (n, d = 2) => n.toFixed(d).replace('.', ',');
+const pct = n => (n >= 0 ? '+' : '−') + dec(Math.abs(n * 100)) + ' %';
+const kfmt = n => n >= 1000 ? dec(n / 1000, 1) + 'k' : String(Math.round(n));
+const clock = (s, up) => { s = Math.max(0, up ? Math.ceil(s) : Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const secs = ticks => ticks * CFG.tickMs / 1000;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const cls = n => n > 0 ? 'up' : n < 0 ? 'down' : 'muted';
+const store = (area => ({
+  get(k) { try { return JSON.parse(area().getItem(k)); } catch (e) { return null; } },
+  set(k, v) { try { area().setItem(k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { area().removeItem(k); } catch (e) {} },
+}));
+const local = store(() => localStorage), session = store(() => sessionStorage);
+
+// Everything the client knows comes from the server; this is just the latest picture of it.
+const S = { tick: 0, px: null, candles: [], pr: [0, 0], ph: null, left: null, tape: [], rk: null, me: null, game: null,
+  results: null, room: null, spectator: false, size: 0.5, toast: null, mine: new Set(), seq: 0, tapeVer: 0 };
+const N = { ws: null, id: null, online: false, rtt: null, retry: 0 };
+
+// ---------- network ----------
+function send(msg) { if (N.ws && N.ws.readyState === 1) { N.ws.send(JSON.stringify(msg)); return true; } return false; }
+function connect() {
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  N.ws = ws;
+  ws.onopen = () => {
+    N.online = true; N.retry = 0;
+    const ss = session.get('pr-seat') || {};
+    send({ type: 'hello', name: myName(), token: ss.token, code: ss.code });
+    render();
+  };
+  ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (_) { return; } handle(m); };
+  ws.onclose = () => {
+    if (N.ws !== ws) return;
+    N.online = false; render();
+    setTimeout(connect, Math.min(5000, 500 * 2 ** N.retry++));
+  };
+}
+setInterval(() => send({ type: 'ping', t: performance.now() }), 2000);
+
+function handle(m) {
+  switch (m.type) {
+    case 'hello': {                             // connected, but not seated anywhere
+      const had = session.get('pr-seat');
+      session.del('pr-seat'); S.room = null; resetMarket();
+      // Our seat expired while we were away: take a new one in the same room if it still exists.
+      if (had && had.code) send({ type: 'join', code: had.code, name: myName() || 'Jugador' });
+      break;
+    }
+    case 'welcome':
+      N.id = m.id; session.set('pr-seat', { token: m.token, code: m.code });
+      history.replaceState(null, '', '#' + m.code);
+      break;
+    case 'state':
+      CFG = m.cfg; S.room = m.room; S.tick = m.k; S.px = m.px; S.ph = m.ph; S.left = m.left;
+      S.candles = m.candles; S.tape = m.tape; S.game = m.game; S.results = m.results; S.rk = m.rk;
+      S.me = m.me; S.spectator = m.spectator; S.mine.clear(); S.toast = null; S.tapeVer++;
+      if (S.results) renderResults();
+      break;
+    case 'room':
+      S.room = m;
+      { const mine = m.players.find(p => p.id === N.id); if (mine) S.spectator = mine.spectator; }
+      break;
+    case 'tick': {
+      S.tick = m.k; S.px = m.px; S.pr = m.pr; S.ph = m.ph; S.left = m.left;
+      for (const c of m.cs) {
+        const last = S.candles[S.candles.length - 1];
+        if (last && last.i === c.i) S.candles[S.candles.length - 1] = c;
+        else if (!last || c.i > last.i) S.candles.push(c);
+      }
+      if (S.candles.length > 240) S.candles.splice(0, S.candles.length - 240);
+      for (const e of m.ev) {
+        if (e.type === 'trade' && S.mine.has(e.eid)) continue;
+        S.tape.unshift(e); S.tapeVer++;
+        if (e.type === 'news') S.toast = { text: e.text, tag: e.tag, dir: e.dir, until: m.k + 30 };
+      }
+      if (S.tape.length > 60) S.tape.length = 60;
+      if (m.rk) S.rk = m.rk;
+      break;
+    }
+    case 'start':
+      S.game = m.game; S.results = null; S.tape = []; S.mine.clear(); S.tapeVer++; S.me = null;
+      S.spectator = !m.players.some(p => p.id === N.id);
+      say('');
+      break;
+    case 'me': S.me = m.me; break;
+    case 'fill':
+      S.me = m.me; S.mine.add(m.eid);
+      S.tape.unshift({ type: 'trade', side: Math.sign(m.q), notional: m.notional, px: m.px, tick: S.tick, mine: true }); S.tapeVer++;
+      say((m.q > 0 ? 'Comprado' : 'Vendido') + ' ' + grp(Math.abs(m.q)) + ' acc. a ' + dec(m.px) + ' de precio medio', m.q > 0 ? 'up' : 'down');
+      break;
+    case 'reject': say(m.reason, 'down'); break;
+    case 'end': S.results = m.results; S.ph = 'ended'; renderResults(); break;
+    case 'lobby': S.game = null; S.results = null; S.me = null; S.rk = null; S.spectator = false; S.ph = 'lobby'; break;
+    case 'left': session.del('pr-seat'); history.replaceState(null, '', location.pathname); S.room = null; resetMarket(); break;
+    case 'error': $('#menuMsg').textContent = m.text; break;
+    case 'pong': N.rtt = performance.now() - m.t; break;
+  }
+  render();
+}
+function resetMarket() {
+  Object.assign(S, { px: null, candles: [], pr: [0, 0], ph: null, left: null, tape: [], rk: null, me: null, game: null, results: null, spectator: false, toast: null });
+  S.tapeVer++;
+}
+
+// ---------- actions ----------
+const myName = () => ($('#playerName').value.trim() || local.get('pr-name') || '').slice(0, 18);
+function rememberName() { const n = $('#playerName').value.trim(); if (n) local.set('pr-name', n); return n; }
+function menuAction(msg) {
+  $('#menuMsg').textContent = '';
+  if (!N.online) { $('#menuMsg').textContent = 'Sin conexión con el servidor. Reintentando…'; return; }
+  msg.name = rememberName() || 'Jugador';
+  send(msg);
+}
+function canTrade() { return S.ph === 'live' && !S.spectator && S.me && N.online; }
+function order(side) {
+  if (!S.room) return;
+  if (S.ph !== 'live') { say('La partida aún no ha empezado.'); return; }
+  if (S.spectator) { say('Estás mirando esta partida. Entrarás en la siguiente.'); return; }
+  if (!send({ type: 'order', side, size: S.size, seq: ++S.seq })) { say('Sin conexión: la orden no se ha enviado.', 'down'); return; }
+}
+let msgTimer;
+function say(text, kind) { const m = $('#msg'); m.textContent = text; m.className = 'msg ' + (kind || ''); clearTimeout(msgTimer); if (text) msgTimer = setTimeout(() => { m.textContent = ''; }, 3500); }
+
+// ---------- rendering ----------
+let tapeSeen = -1;
+function equityOf(me) { return me.cash + me.pos * S.px; }
+function render() {
+  const live = S.ph === 'live', ended = S.ph === 'ended', inRoom = !!S.room;
+  const me = S.me, p = S.px;
+
+  // connection
+  const net = $('#net'); net.classList.toggle('off', !N.online);
+  $('#netTxt').textContent = N.online ? 'En línea' + (N.rtt != null ? ' · ' + Math.round(N.rtt) + ' ms' : '') : 'Reconectando…';
+  $('#offline').hidden = N.online;
+
+  // quote
+  $('#px').textContent = p != null ? dec(p) : '—';
+  const chg = $('#chg');
+  if (p != null && S.candles.length) {
+    const ref = S.game ? S.game.startPrice : S.candles[Math.max(0, S.candles.length - 61)].o;
+    const ch = p / ref - 1;
+    chg.textContent = pct(ch) + (S.game ? ' desde la campana' : ' en 5 min'); chg.className = 'chg ' + cls(ch);
+  } else chg.textContent = '';
+
+  // clock
+  const clk = $('#clock'); let t = '—:—', lbl = 'Sin sala', closing = false;
+  if (live && S.left != null) {
+    t = clock(secs(S.left), true); closing = S.left <= CFG.closeTicks;
+    lbl = closing ? 'Ventana de cierre<br>cuenta el precio medio' : 'Partida<br>en curso';
+  } else if (ended) { t = '0:00'; lbl = 'Mercado<br>cerrado'; }
+  else if (inRoom) {
+    if (S.left != null) { t = clock(secs(S.left), true); lbl = 'La campana<br>suena en'; }
+    else { t = '—:—'; lbl = S.room.private ? 'Esperando<br>al anfitrión' : 'Esperando<br>jugadores'; }
+  }
+  $('#timer').textContent = t; $('#clockLbl').innerHTML = lbl; clk.classList.toggle('closing', closing);
+
+  // my equity
+  const myRow = ended && S.results ? S.results.rows.find(r => r.id === N.id) : null;
+  const eq = live && me && p != null ? equityOf(me) : myRow ? myRow.eq : CFG.startCash;
+  $('#myEq').textContent = money(eq);
+  const mp = $('#myPnl'); mp.textContent = smoney(eq - CFG.startCash) + ' · ' + pct(eq / CFG.startCash - 1); mp.className = 'num ' + cls(eq - CFG.startCash);
+
+  // ticket
+  if (live && me && me.pos) {
+    $('#posTxt').innerHTML = '<span class="' + (me.pos > 0 ? 'up' : 'down') + '">' + (me.pos > 0 ? 'Largo ' : 'Corto ') + grp(me.pos) + '</span> acc.';
+    $('#avgTxt').textContent = dec(me.avg);
+    const u = (p - me.avg) * me.pos, ut = $('#upnlTxt');
+    ut.textContent = smoney(u) + ' · ' + pct((p / me.avg - 1) * Math.sign(me.pos)); ut.className = 'v ' + cls(u);
+  } else {
+    $('#posTxt').textContent = live && S.spectator ? 'Mirando' : 'Sin posición'; $('#avgTxt').textContent = '—';
+    const ut = $('#upnlTxt'); ut.textContent = '—'; ut.className = 'v';
+  }
+  $('#cashTxt').textContent = money(live && me ? me.cash : eq);
+  const ok = !!canTrade();
+  for (const id of ['#buyBtn', '#sellBtn', '#closeBtn']) $(id).disabled = !ok;
+  document.querySelectorAll('.chip').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.size === S.size)));
+
+  // pressure
+  const [B, Sv] = S.pr, pr = (B - Sv) / (B + Sv + 1), fillEl = $('#pFill'), w = Math.min(50, Math.abs(pr) * 50);
+  fillEl.style.width = w + '%'; fillEl.style.left = pr >= 0 ? '50%' : (50 - w) + '%';
+  fillEl.style.background = pr >= 0 ? 'var(--up)' : 'var(--down)';
+  $('#inTxt').textContent = 'Entra ' + kfmt(B) + ' $';
+  $('#outTxt').textContent = 'Sale ' + kfmt(Sv) + ' $';
+  const share = B / (B + Sv + 1);
+  $('#pLabel').textContent = B + Sv < 1 ? 'Flujo de los últimos 10 s' : (share >= .5 ? 'Presión compradora ' + Math.round(share * 100) : 'Presión vendedora ' + Math.round((1 - share) * 100)) + ' % · últimos 10 s';
+
+  // candle countdown
+  if (inRoom) {
+    const left = secs(CFG.candleTicks - S.tick % CFG.candleTicks);
+    $('#nextTxt').textContent = 'nueva vela en ' + dec(left, 1) + ' s';
+    $('#nextBar').style.width = ((S.tick % CFG.candleTicks) / CFG.candleTicks * 100) + '%';
+  } else { $('#nextTxt').textContent = ''; $('#nextBar').style.width = '0'; }
+
+  renderSide(live, ended);
+  if (S.tapeVer !== tapeSeen) { renderTape(); tapeSeen = S.tapeVer; }
+
+  const toast = $('#toast');
+  if (S.toast && S.tick < S.toast.until && live) {
+    const tg = S.toast.tag === 'RUMOR' ? 'rumor' : S.toast.dir > 0 ? 'up' : 'down';
+    toast.innerHTML = '<span class="tag ' + tg + '">' + S.toast.tag + '</span>' + esc(S.toast.text);
+    toast.hidden = false;
+  } else toast.hidden = true;
+
+  $('#menu').hidden = inRoom;
+  $('#roomLobby').hidden = !(inRoom && S.ph === 'lobby');
+  $('#results').hidden = !(inRoom && ended && S.results);
+  if (inRoom && S.ph === 'lobby') renderRoomLobby();
+  if (inRoom && ended && S.left != null) $('#resBack').textContent = 'Volvéis a la sala en ' + Math.ceil(secs(S.left)) + ' s. Puedes quedarte para la revancha.';
+  drawChart();
+}
+
+function renderSide(live, ended) {
+  const R = S.room;
+  $('#roomTxt').textContent = R ? (R.private ? 'Sala ' + R.code : 'Sala pública') + ' · ' + R.players.filter(p => p.connected).length + '/8' : '';
+  if ((live && S.rk) || (ended && S.results)) {
+    $('#sideTitle').textContent = ended ? 'Resultado final' : 'Clasificación';
+    const rows = ended ? S.results.rows : S.rk;
+    const maxAbs = Math.max(0.01, ...rows.map(r => Math.abs(r.pnl)));
+    $('#rank').innerHTML = rows.map((r, i) => {
+      const w = Math.abs(r.pnl) / maxAbs * 50;
+      const bar = '<i style="' + (r.pnl >= 0 ? 'left:50%' : 'left:' + (50 - w) + '%') + ';width:' + w + '%;background:var(--' + (r.pnl >= 0 ? 'up' : 'down') + ')"></i>';
+      return '<li class="' + (r.id === N.id ? 'you' : '') + '"><span class="n">' + (i + 1) + '</span><span class="nm">' + esc(r.name)
+        + (r.id === N.id ? '<span class="mini acc">TÚ</span>' : '') + (r.bot ? '<span class="mini">BOT</span>' : '') + (r.liq ? '<span class="mini warn">LIQ</span>' : '') + '</span>'
+        + '<span class="pl ' + cls(r.pnl) + '">' + pct(r.pnl) + '</span><span class="bar">' + bar + '</span></li>';
+    }).join('');
+  } else if (R) {
+    $('#sideTitle').textContent = 'Jugadores';
+    $('#rank').innerHTML = R.players.map((h, i) => '<li class="' + (h.id === N.id ? 'you' : '') + '"><span class="n">' + (i + 1) + '</span><span class="nm">' + esc(h.name)
+      + (h.host ? '<span class="mini acc">ANFITRIÓN</span>' : '') + (h.connected ? '' : '<span class="mini warn">DESCONECTADO</span>') + (h.spectator ? '<span class="mini">MIRANDO</span>' : '')
+      + '</span><span class="pl">' + (S.ph === 'lobby' ? (h.ready ? '<span class="mini ok">LISTO</span>' : '<span class="mini">ESPERANDO</span>') : '') + '</span></li>').join('');
+  } else {
+    $('#sideTitle').textContent = 'Sala';
+    $('#rank').innerHTML = '<li><span class="n"></span><span class="nm muted">Únete a una sala para ver a los jugadores.</span><span></span></li>';
+  }
+}
+
+function renderRoomLobby() {
+  const R = S.room, mine = R.players.find(p => p.id === N.id) || {};
+  $('#roomKind').textContent = R.private ? 'Sala privada · ' + R.mins + ' min' : 'Sala pública · ' + R.mins + ' min';
+  const humans = R.players.filter(p => p.connected).length, bots = Math.max(0, 8 - humans);
+  $('#roomTitle').textContent = humans === 1 ? 'Estás tú solo en la sala' : humans + ' jugadores en la sala';
+  let status;
+  if (S.left != null) status = 'La campana suena en ' + Math.ceil(secs(S.left)) + ' s.';
+  else if (R.private) status = mine.host ? 'Eres el anfitrión: empieza cuando estéis todos.' : 'Esperando a que el anfitrión empiece.';
+  else status = 'Esperando jugadores.';
+  status += bots ? ' Los ' + bots + ' huecos libres los ocuparán bots.' : '';
+  if (!R.private) status += ' Si estáis todos listos, empieza en 3 s.';
+  $('#roomStatus').textContent = status;
+  $('#roster').innerHTML = R.players.map(h => '<li class="' + (h.id === N.id ? 'you' : '') + '"><span>' + esc(h.name)
+    + (h.host ? '<span class="mini acc">ANFITRIÓN</span>' : '') + (h.connected ? '' : '<span class="mini warn">DESCONECTADO</span>') + '</span>'
+    + (h.ready ? '<span class="mini ok">LISTO</span>' : '<span class="mini">ESPERANDO</span>') + '</li>').join('');
+  $('#codeBox').hidden = !R.private;
+  $('#roomCode').textContent = R.code;
+  $('#hostRow').hidden = !(R.private && mine.host);
+  if (document.activeElement !== $('#roomMins')) $('#roomMins').value = String(R.mins);
+  const rb = $('#readyBtn'); rb.setAttribute('aria-pressed', String(!!mine.ready)); rb.textContent = mine.ready ? 'Listo ✓' : 'Estoy listo';
+}
+
+function renderTape() {
+  const tm = t => S.game && t >= S.game.start ? clock(secs(t - S.game.start)) : 'pre';
+  $('#tape').innerHTML = S.tape.map(e => {
+    let body;
+    if (e.type === 'news') {
+      const tg = e.tag === 'RUMOR' ? 'rumor' : e.dir > 0 ? 'up' : 'down';
+      body = '<span class="tag ' + tg + '">' + esc(e.tag) + '</span>' + esc(e.text);
+    } else if (e.type === 'trade') {
+      body = (e.mine ? '<b>Tú</b> · ' : '') + '<span class="' + (e.side > 0 ? 'up' : 'down') + '">' + (e.side > 0 ? 'Compra' : 'Venta') + ' ' + kfmt(e.notional) + ' $</span> <span class="muted">a ' + dec(e.px) + '</span>';
+    } else body = '<span class="muted">' + esc(e.text) + '</span>';
+    return '<li class="' + (e.mine ? 'mine' : '') + '"><span class="tm">' + tm(e.tick) + '</span><span>' + body + '</span></li>';
+  }).join('') || '<li><span class="tm">—</span><span class="muted">Aquí aparecerán las noticias y las órdenes de más de 1.500 $.</span></li>';
+}
+
+function renderResults() {
+  const R = S.results; if (!R) return;
+  const i = R.rows.findIndex(r => r.id === N.id), me = R.rows[i];
+  if (!me) { $('#resTitle').textContent = 'Resultados de la partida'; $('#resSub').textContent = 'Liquidación a ' + dec(R.settle) + ', la media de los últimos 30 s.'; }
+  else {
+    $('#resTitle').textContent = i === 0 ? '¡Has ganado la sala!' : 'Has quedado ' + (i + 1) + '.º de ' + R.rows.length;
+    $('#resSub').innerHTML = 'Patrimonio final <b class="' + cls(me.pnl) + '">' + money(me.eq) + ' (' + pct(me.pnl) + ')</b> con ' + me.trades + ' operaciones. Liquidación a ' + dec(R.settle) + ', la media de los últimos 30 s.';
+  }
+  $('#resBody').innerHTML = R.rows.map((r, k) => '<tr class="' + (r.id === N.id ? 'you' : '') + '"><td>' + (k + 1) + '.</td><td>' + esc(r.name) + (r.bot ? ' <span class="mini">BOT</span>' : '') + '</td><td>' + money(r.eq) + '</td><td class="' + cls(r.pnl) + '">' + pct(r.pnl) + '</td></tr>').join('');
+}
+
+function niceTicks(lo, hi, n) {
+  const step0 = (hi - lo) / n, mag = 10 ** Math.floor(Math.log10(step0)), r = step0 / mag;
+  const step = (r < 1.5 ? 1 : r < 3 ? 2 : r < 7 ? 5 : 10) * mag, out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) out.push(v);
+  return out;
+}
+
+function drawChart() {
+  const cv = $('#chart'), wrap = cv.parentElement, dpr = window.devicePixelRatio || 1;
+  const W = wrap.clientWidth, H = wrap.clientHeight; if (!W || !H) return;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  if (!S.candles.length || S.px == null) return;
+  const css = getComputedStyle(document.documentElement), v = k => css.getPropertyValue(k).trim();
+  const C = { up: v('--up'), down: v('--down'), grid: v('--grid'), muted: v('--muted'), accent: v('--accent'), on: v('--on-signal') };
+  const mono = v('--mono');
+  const axisW = 66, left = 8, top = 14, xLab = 20, volH = Math.round(Math.max(56, H * .22)), gapV = 14;
+  const plotW = W - axisW - left, priceH = H - top - volH - gapV - xLab;
+  const spacing = Math.max(6, Math.min(14, plotW / 64)), n = Math.max(10, Math.floor(plotW / spacing));
+  const list = S.candles.slice(-n), lastI = list[list.length - 1].i, T = CFG.candleTicks;
+  const X = i => left + plotW - (lastI - i + .5) * spacing;
+  const XT = tick => X(Math.floor(tick / T)) - spacing / 2 + (tick % T) / T * spacing;
+  let lo = Infinity, hi = -Infinity;
+  for (const c of list) { if (c.l < lo) lo = c.l; if (c.h > hi) hi = c.h; }
+  const me = S.me, showAvg = S.ph === 'live' && me && me.pos;
+  if (showAvg) { lo = Math.min(lo, me.avg); hi = Math.max(hi, me.avg); }
+  const pad = Math.max((hi - lo) * .08, hi * .002); lo -= pad; hi += pad;
+  const Y = p => top + (hi - p) / (hi - lo) * priceH;
+  const vTop = top + priceH + gapV, mid = vTop + volH / 2;
+  g.font = '11px ' + mono; g.textBaseline = 'middle'; g.lineWidth = 1;
+
+  g.strokeStyle = C.grid; g.fillStyle = C.muted;
+  for (const t of niceTicks(lo, hi, 5)) {
+    const y = Math.round(Y(t)) + .5;
+    g.beginPath(); g.moveTo(left, y); g.lineTo(left + plotW, y); g.stroke();
+    g.fillText(dec(t), left + plotW + 10, y);
+  }
+  g.beginPath(); g.moveTo(left, Math.round(mid) + .5); g.lineTo(left + plotW, Math.round(mid) + .5); g.stroke();
+  g.fillStyle = C.up; g.fillText('ENTRA', left + plotW + 10, vTop + 8);
+  g.fillStyle = C.down; g.fillText('SALE', left + plotW + 10, vTop + volH - 8);
+
+  if (S.game) {
+    const cs = S.game.end - CFG.closeTicks;
+    const x0 = Math.max(left, XT(cs)), x1 = Math.min(left + plotW, XT(S.game.end));
+    if (x1 > x0) {
+      g.globalAlpha = .1; g.fillStyle = C.accent; g.fillRect(x0, top, x1 - x0, vTop + volH - top); g.globalAlpha = 1;
+      g.fillStyle = C.accent; g.font = '600 10px ' + mono; g.fillText('CIERRE', x0 + 5, top + 6); g.font = '11px ' + mono;
+    }
+    const xs = XT(S.game.start);
+    if (xs >= left) {
+      g.strokeStyle = C.accent; g.setLineDash([2, 4]);
+      g.beginPath(); g.moveTo(Math.round(xs) + .5, top); g.lineTo(Math.round(xs) + .5, vTop + volH); g.stroke(); g.setLineDash([]);
+      g.fillStyle = C.accent; g.font = '600 10px ' + mono; g.fillText('CAMPANA', xs + 5, top + 6); g.font = '11px ' + mono;
+    }
+  }
+
+  const bw = Math.max(2, Math.round(spacing * .62)), half = volH / 2 - 2;
+  let mv = 1; for (const c of list) mv = Math.max(mv, c.bv, c.sv);
+  for (const c of list) {
+    const x = Math.round(X(c.i)), up = c.c >= c.o, col = up ? C.up : C.down;
+    g.strokeStyle = col; g.fillStyle = col;
+    g.beginPath(); g.moveTo(x + .5, Y(c.h)); g.lineTo(x + .5, Y(c.l)); g.stroke();
+    const y1 = Y(Math.max(c.o, c.c)), y2 = Y(Math.min(c.o, c.c));
+    g.fillRect(x - bw / 2 + .5, y1, bw, Math.max(1, y2 - y1));
+    g.globalAlpha = .8;
+    let h = c.bv / mv * half; g.fillStyle = C.up; g.fillRect(x - bw / 2 + .5, mid - h, bw, h);
+    h = c.sv / mv * half; g.fillStyle = C.down; g.fillRect(x - bw / 2 + .5, mid + 1, bw, h);
+    g.globalAlpha = 1;
+    if (c.i % 12 === 0) {
+      const ref = S.game ? S.game.start : S.tick, s = secs(c.i * T - ref);
+      g.fillStyle = C.muted; g.textAlign = 'center';
+      g.fillText((s < 0 ? '−' : '') + clock(Math.abs(s)), x, H - xLab / 2);
+      g.textAlign = 'left';
+    }
+  }
+
+  if (showAvg) {
+    const ya = Math.round(Y(me.avg)) + .5;
+    g.strokeStyle = C.accent; g.setLineDash([6, 4]);
+    g.beginPath(); g.moveTo(left, ya); g.lineTo(left + plotW, ya); g.stroke(); g.setLineDash([]);
+    g.fillStyle = C.accent; g.fillText('Tu entrada ' + dec(me.avg), left + 4, ya - 9);
+  }
+
+  const p = S.px, yp = Math.round(Y(p)) + .5, last = list[list.length - 1], pc = last.c >= last.o ? C.up : C.down;
+  g.strokeStyle = pc; g.setLineDash([3, 3]);
+  g.beginPath(); g.moveTo(left, yp); g.lineTo(left + plotW, yp); g.stroke(); g.setLineDash([]);
+  g.fillStyle = pc; g.fillRect(left + plotW + 3, yp - 10, axisW - 5, 20);
+  g.fillStyle = C.on; g.font = '600 11px ' + mono; g.fillText(dec(p), left + plotW + 10, yp);
+}
+
+// ---------- wiring ----------
+(function init() {
+  const nm = local.get('pr-name'); if (nm) $('#playerName').value = nm;
+  const h = location.hash.slice(1).toUpperCase(); if (/^[A-Z]{4}$/.test(h)) $('#joinCode').value = h;
+  $('#menuForm').addEventListener('submit', e => { e.preventDefault(); menuAction({ type: 'quick' }); });
+  $('#createBtn').addEventListener('click', () => menuAction({ type: 'create', mins: 5 }));
+  $('#joinBtn').addEventListener('click', () => {
+    const code = $('#joinCode').value.trim().toUpperCase();
+    if (!/^[A-Z]{4}$/.test(code)) { $('#menuMsg').textContent = 'El código tiene 4 letras, por ejemplo KQBT.'; return; }
+    menuAction({ type: 'join', code });
+  });
+  $('#joinCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#joinBtn').click(); } });
+  $('#readyBtn').addEventListener('click', () => { const mine = S.room && S.room.players.find(p => p.id === N.id); send({ type: 'ready', ready: !(mine && mine.ready) }); });
+  $('#hostStartBtn').addEventListener('click', () => send({ type: 'start' }));
+  $('#roomMins').addEventListener('change', e => send({ type: 'config', mins: +e.target.value }));
+  $('#leaveBtn').addEventListener('click', () => send({ type: 'leave' }));
+  $('#resLeaveBtn').addEventListener('click', () => send({ type: 'leave' }));
+  $('#copyBtn').addEventListener('click', () => {
+    const link = location.origin + location.pathname + '#' + S.room.code, b = $('#copyBtn');
+    const done = ok => { b.textContent = ok ? 'Enlace copiado' : link; setTimeout(() => { b.textContent = 'Copiar enlace'; }, 2500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(link).then(() => done(true), () => done(false)); else done(false);
+  });
+  $('#buyBtn').addEventListener('click', () => order('buy'));
+  $('#sellBtn').addEventListener('click', () => order('sell'));
+  $('#closeBtn').addEventListener('click', () => order('close'));
+  document.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => { S.size = +b.dataset.size; render(); }));
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('input,select,textarea') || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === 'c') order('buy');
+    else if (k === 'v') order('sell');
+    else if (k === 'x') order('close');
+    else if (k === '1' || k === '2' || k === '3') { S.size = [.25, .5, 1][+k - 1]; render(); }
+    else return;
+    e.preventDefault();
+  });
+  new ResizeObserver(drawChart).observe($('.chart-wrap'));
+  render();
+  connect();
+})();
+</script>
+</body>
+</html>

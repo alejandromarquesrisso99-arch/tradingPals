@@ -18,9 +18,14 @@ export const CFG = {
   tableSize: 8,        // bots fill the room up to this many traders
 };
 
+// Avatar = [body colour, eyes, mouth, hat, background]; the client draws it from these indexes.
+export const AV_N = [8, 7, 7, 9, 6];
+export const randomAv = () => AV_N.map(n => Math.floor(Math.random() * n));
+export const cleanAv = a => Array.isArray(a) && a.length === AV_N.length && a.every((v, i) => Number.isInteger(v) && v >= 0 && v < AV_N[i]) ? a.slice() : randomAv();
+
 export const BOT_DEFS = [
-  ['La Ballena', 'whale'], ['Rubén·Quant', 'momentum'], ['HODLer_93', 'momentum'],
-  ['Tía Paqui', 'contrarian'], ['Dip_Buyer', 'contrarian'], ['Cuñado Inversor', 'noise'], ['Lobo de Lavapiés', 'noise'],
+  ['La Ballena', 'whale', [4, 3, 5, 1, 1]], ['Rubén·Quant', 'momentum', [3, 2, 2, 6, 0]], ['HODLer_93', 'momentum', [6, 1, 1, 3, 2]],
+  ['Tía Paqui', 'contrarian', [2, 0, 0, 5, 3]], ['Dip_Buyer', 'contrarian', [5, 6, 3, 4, 5]], ['Cuñado Inversor', 'noise', [1, 4, 4, 7, 4]], ['Lobo de Lavapiés', 'noise', [7, 5, 6, 8, 5]],
 ];
 
 const NEWS = {
@@ -35,11 +40,11 @@ export const rint = (a, b) => Math.floor(rand(a, b + 1));
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const randn = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 
-export function makeTrader(id, name, kind) {
-  return { id, name, kind, cash: CFG.startCash, pos: 0, avg: 0, trades: 0, vol: 0, liq: false, ver: 0,
+export function makeTrader(id, name, kind, av) {
+  return { id, name, kind, av, cash: CFG.startCash, pos: 0, avg: 0, trades: 0, vol: 0, liq: false, ver: 0,
     st: { q: 0, chunk: 0, cool: rint(0, 40), hold: 0 } };
 }
-export const lobbyBots = () => BOT_DEFS.map((b, i) => makeTrader('b' + i, b[0], b[1]));
+export const lobbyBots = () => BOT_DEFS.map((b, i) => makeTrader('b' + i, b[0], b[1], b[2]));
 
 export class Market {
   constructor() {

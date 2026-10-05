@@ -55,7 +55,7 @@ export class Room {
       p = {
         id: 'p' + crypto.randomBytes(4).toString('hex'),
         token: crypto.randomBytes(16).toString('hex'),
-        name: nm, ws, connected: true, ready: false,
+        name: nm, av: ws.av, ws, connected: true, ready: false,
         host: this.isPrivate && this.players.size === 0,
         spectator: this.phase !== 'lobby',
         trader: null, sentVer: -1, bucket: { tokens: 5, at: Date.now() },
@@ -143,8 +143,8 @@ export class Room {
   startGame() {
     const hs = this.connected();
     for (const p of [...this.players.values()]) if (!p.connected) this.players.delete(p.token);
-    for (const p of hs) { p.spectator = false; p.ready = false; p.trader = makeTrader(p.id, p.name, 'human'); p.sentVer = -1; }
-    const bots = BOT_DEFS.slice(0, Math.max(0, CFG.tableSize - hs.length)).map((b, i) => makeTrader('b' + i, b[0], b[1]));
+    for (const p of hs) { p.spectator = false; p.ready = false; p.trader = makeTrader(p.id, p.name, 'human', p.av); p.sentVer = -1; }
+    const bots = BOT_DEFS.slice(0, Math.max(0, CFG.tableSize - hs.length)).map((b, i) => makeTrader('b' + i, b[0], b[1], b[2]));
     this.traders = [...hs.map(p => p.trader), ...bots];
     const m = this.market;
     this.game = { start: m.tick, end: m.tick + Math.round(this.mins * 60000 / CFG.tickMs), mins: this.mins, startPrice: r2(m.price()), closeTicks: CFG.closeTicks };
@@ -152,7 +152,7 @@ export class Room {
     this.phase = 'live'; this.countdown = null; this.results = null; this.tape = [];
     m.live = true; m.pending = []; m.nextNews = m.tick + rint(60, 150);
     m.emit({ type: 'sys', text: `Suena la campana: empieza la partida de ${this.mins} min` });
-    this.broadcast({ type: 'start', game: this.game, players: this.traders.map(t => ({ id: t.id, name: t.name, bot: t.kind !== 'human' })) });
+    this.broadcast({ type: 'start', game: this.game, players: this.traders.map(t => ({ id: t.id, name: t.name, av: t.av, bot: t.kind !== 'human' })) });
     for (const p of hs) { this.send(p, { type: 'me', me: this.me(p.trader) }); p.sentVer = p.trader.ver; }
     this.broadcastRoster();
   }
@@ -161,7 +161,7 @@ export class Room {
     const m = this.market, settle = this.twapN ? this.twapSum / this.twapN : m.price();
     const rows = this.traders.map(t => {
       const eq = t.cash + t.pos * settle;
-      return { id: t.id, name: t.name, bot: t.kind !== 'human', eq: Math.round(eq), pnl: eq / CFG.startCash - 1, trades: t.trades, liq: t.liq };
+      return { id: t.id, name: t.name, av: t.av, bot: t.kind !== 'human', eq: Math.round(eq), pnl: eq / CFG.startCash - 1, trades: t.trades, liq: t.liq };
     }).sort((a, b) => b.eq - a.eq);
     for (const t of this.traders) { t.cash += t.pos * settle; t.pos = 0; t.avg = 0; t.st.q = 0; }
     this.results = { settle: r2(settle), rows };
@@ -222,7 +222,7 @@ export class Room {
   rank() {
     if (this.phase !== 'live') return null;
     const m = this.market;
-    return this.traders.map(t => ({ id: t.id, name: t.name, pnl: Math.round((m.equity(t) / CFG.startCash - 1) * 1e5) / 1e5, liq: t.liq, bot: t.kind !== 'human' }))
+    return this.traders.map(t => ({ id: t.id, name: t.name, av: t.av, pnl: Math.round((m.equity(t) / CFG.startCash - 1) * 1e5) / 1e5, liq: t.liq, bot: t.kind !== 'human' }))
       .sort((a, b) => b.pnl - a.pnl);
   }
 
@@ -245,7 +245,7 @@ export class Room {
   roster() {
     return {
       type: 'room', code: this.code, private: this.isPrivate, mins: this.mins, phase: this.phase,
-      players: this.humans().map(h => ({ id: h.id, name: h.name, ready: h.ready, host: h.host, connected: h.connected, spectator: h.spectator })),
+      players: this.humans().map(h => ({ id: h.id, name: h.name, av: h.av, ready: h.ready, host: h.host, connected: h.connected, spectator: h.spectator })),
     };
   }
 

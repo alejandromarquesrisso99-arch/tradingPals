@@ -22,6 +22,7 @@ npm run bots -- 2 KQBT       # 2 jugadores entran en la sala privada KQBT
 
 ## Cómo se juega
 
+- **Antes de entrar** te haces un avatar (color, ojos, boca, accesorio y fondo) que verán los demás en la sala, la clasificación y el podio. Se guarda en tu navegador.
 - **Partida rápida**: entras en una sala pública. La campana suena 30 s después de que entre el primer jugador, o a los 3 s si todos marcan «Estoy listo».
 - **Sala privada**: recibes un código de 4 letras y un enlace para compartir. El anfitrión elige la duración (1, 3 o 5 min) y decide cuándo empezar.
 - Los huecos libres hasta 8 los ocupan bots con estrategias distintas: ballena, seguidores de tendencia, contrarians y ruido.
@@ -57,8 +58,8 @@ Los parámetros están en `CFG`, en [server/market.js](server/market.js).
 
 | Cliente → servidor | |
 |---|---|
-| `hello {name, token?, code?}` | Al conectar. Con `token`+`code` recupera el asiento tras una recarga |
-| `quick {name}` · `create {name, mins}` · `join {name, code}` · `leave` | Salas |
+| `hello {name, av?, token?, code?}` | Al conectar. Con `token`+`code` recupera el asiento tras una recarga |
+| `quick {name, av}` · `create {name, av, mins}` · `join {name, av, code}` · `leave` | Salas |
 | `ready {ready}` · `start` · `config {mins}` | Sala de espera (`start`/`config` solo el anfitrión) |
 | `order {side: buy\|sell\|close, size: 0.25\|0.5\|1, seq}` | Operar |
 | `ping {t}` | Latencia |
@@ -70,6 +71,8 @@ Los parámetros están en `CFG`, en [server/market.js](server/market.js).
 | `room {...}` | Lista de jugadores |
 | `start` · `end {results}` · `lobby` | Cambios de fase |
 | `fill {seq, q, px, eid, me}` · `reject {seq, reason}` · `me {me}` | Tus órdenes y tu posición |
+
+`av` es el avatar: `[color, ojos, boca, accesorio, fondo]`, cinco índices que el servidor valida contra `AV_N` (en `server/market.js`) y el cliente dibuja en SVG. Viaja en `room`, en la clasificación (`rk`) y en los resultados.
 
 La cinta es anónima: nadie ve quién ha hecho cada orden grande. Tus propias órdenes te llegan por `fill`.
 

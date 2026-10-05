@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Room } from './room.js';
+import { cleanAv } from './market.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -51,7 +52,7 @@ const server = http.createServer(async (req, res) => {
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 2048 });
 
 wss.on('connection', ws => {
-  ws.alive = true; ws.room = null; ws.player = null; ws.name = 'Jugador';
+  ws.alive = true; ws.room = null; ws.player = null; ws.name = 'Jugador'; ws.av = cleanAv();
   ws.rate = { n: 0, at: Date.now() };
   ws.on('pong', () => { ws.alive = true; });
   const send = msg => ws.readyState === 1 && ws.send(JSON.stringify(msg));
@@ -67,21 +68,21 @@ wss.on('connection', ws => {
 
     switch (msg.type) {
       case 'hello': {
-        ws.name = cleanName(msg.name);
+        ws.name = cleanName(msg.name); if (msg.av) ws.av = cleanAv(msg.av);
         const r = typeof msg.code === 'string' && rooms.get(msg.code);
         if (r && typeof msg.token === 'string' && r.hasToken(msg.token)) r.addPlayer(ws, ws.name, msg.token);
         else send({ type: 'hello' });
         break;
       }
-      case 'quick': leave(); if (msg.name) ws.name = cleanName(msg.name); quickRoom().addPlayer(ws, ws.name); break;
+      case 'quick': leave(); if (msg.name) ws.name = cleanName(msg.name); if (msg.av) ws.av = cleanAv(msg.av); quickRoom().addPlayer(ws, ws.name); break;
       case 'create': {
-        leave(); if (msg.name) ws.name = cleanName(msg.name);
+        leave(); if (msg.name) ws.name = cleanName(msg.name); if (msg.av) ws.av = cleanAv(msg.av);
         const mins = [1, 3, 5].includes(msg.mins) ? msg.mins : 5;
         createRoom(true, mins).addPlayer(ws, ws.name);
         break;
       }
       case 'join': {
-        if (msg.name) ws.name = cleanName(msg.name);
+        if (msg.name) ws.name = cleanName(msg.name); if (msg.av) ws.av = cleanAv(msg.av);
         const r = rooms.get(String(msg.code || '').toUpperCase().trim());
         if (!r) return send({ type: 'error', text: 'No existe ninguna sala con ese código.' });
         if (r === room) return;

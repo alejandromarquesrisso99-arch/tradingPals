@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<script defer src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js" integrity="sha384-x0YgkOr/3UOZP2CRDxGW9e0Q+2Qjyr3uJrm4xU32Y7ZCNAo7Cc7bjhrZMi/dwczu" crossorigin="anonymous"></script>
 <style>
 /* Layout: one-screen trading floor. Header strip with the bell clock, chart dominant on the left with volume and tape, order ticket and room on the right. Dark-first. */
 :root{
@@ -50,6 +51,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--body);pa
 .net{font:400 11px var(--mono);letter-spacing:0;color:var(--muted);display:flex;align-items:center;gap:6px;margin-left:6px}
 .net i{width:7px;height:7px;border-radius:50%;background:var(--up)}
 .net.off i{background:var(--down)}
+.net.idle i{background:var(--muted)}
 .quote{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-width:0}
 .tkr{font:600 12px var(--mono);padding:2px 7px;border:1px solid var(--line);border-radius:4px;letter-spacing:.08em;align-self:center}
 .co{color:var(--muted);font-size:12px}
@@ -155,6 +157,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--body);pa
 .codebox button{font:600 12px var(--body);padding:7px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel2);color:var(--fg);cursor:pointer}
 .divider{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px}
 .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
+.sheet p.note{font-size:12px;margin-top:-6px}
+.sheet p.host-note{font-size:12px;padding:8px 10px;border-radius:7px;background:color-mix(in srgb,var(--accent) 10%,var(--panel2));color:var(--fg)}
 
 @media (max-width:920px){
   .floor{grid-template-columns:minmax(0,1fr)}
@@ -172,7 +176,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--body);pa
 <div class="app">
   <header class="top">
     <div class="brand"><span class="bell" aria-hidden="true"></span>Parqué Relámpago
-      <div class="net off" id="net"><i></i><span id="netTxt">Conectando…</span></div>
+      <div class="net idle" id="net"><i></i><span id="netTxt">Sin conectar</span></div>
     </div>
     <div class="quote">
       <span class="tkr">NOVA</span>
@@ -201,7 +205,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--body);pa
         <div class="chart-wrap">
           <canvas id="chart"></canvas>
           <div class="toast" id="toast" hidden></div>
-          <div class="banner" id="offline" hidden>Sin conexión con el servidor. Reintentando…</div>
+          <div class="banner" id="offline" hidden>Sin conexión con el anfitrión. Reintentando…</div>
 
           <!-- Not in a room yet -->
           <div class="overlay" id="menu">
@@ -222,7 +226,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--body);pa
                 <button class="btn ghost" type="button" id="joinBtn">Unirse</button>
               </div>
               <button class="btn ghost" type="button" id="createBtn">Crear sala privada</button>
-              <div class="msg down" id="menuMsg" aria-live="polite"></div>
+              <p class="note">No hay servidor: la sala vive en el navegador de quien la abre y el resto os conectáis directamente a él.</p>
+              <div class="msg" id="menuMsg" aria-live="polite"></div>
             </form>
           </div>
 
@@ -232,6 +237,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--body);pa
               <div class="eyebrow" id="roomKind">Sala pública</div>
               <h2 id="roomTitle">Esperando jugadores</h2>
               <p id="roomStatus"></p>
+              <p class="host-note" id="hostNote" hidden>Tu navegador hace de servidor de esta sala. Si cierras o recargas la pestaña, la partida se corta para todos.</p>
               <ul class="roster" id="roster"></ul>
               <div class="codebox" id="codeBox"><span>Código</span><b id="roomCode">----</b><button type="button" id="copyBtn">Copiar enlace</button></div>
               <div class="row2" id="hostRow">
@@ -304,7 +310,9 @@ body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--body);pa
   </main>
 </div>
 
-<script>
+<script type="module">
+import { quickMatch, createRoom, joinRoom, resume } from './js/p2p.js';
+
 const $ = s => document.querySelector(s);
 let CFG = { tickMs: 200, candleTicks: 25, startCash: 10000, closeTicks: 150 };
 
@@ -323,45 +331,56 @@ const store = (area => ({
   set(k, v) { try { area().setItem(k, JSON.stringify(v)); } catch (e) {} },
   del(k) { try { area().removeItem(k); } catch (e) {} },
 }));
-const local = store(() => localStorage), session = store(() => sessionStorage);
+const local = store(() => localStorage);
 
-// Everything the client knows comes from the server; this is just the latest picture of it.
+// Everything the client knows comes from the room (run by the host); this is just the latest picture of it.
 const S = { tick: 0, px: null, candles: [], pr: [0, 0], ph: null, left: null, tape: [], rk: null, me: null, game: null,
   results: null, room: null, spectator: false, size: 0.5, toast: null, mine: new Set(), seq: 0, tapeVer: 0 };
-const N = { ws: null, id: null, online: false, rtt: null, retry: 0 };
+const N = { net: null, id: null, busy: false, online: false, rtt: null };
 
 // ---------- network ----------
-function send(msg) { if (N.ws && N.ws.readyState === 1) { N.ws.send(JSON.stringify(msg)); return true; } return false; }
-function connect() {
-  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-  N.ws = ws;
-  ws.onopen = () => {
-    N.online = true; N.retry = 0;
-    const ss = session.get('pr-seat') || {};
-    send({ type: 'hello', name: myName(), token: ss.token, code: ss.code });
-    render();
-  };
-  ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch (_) { return; } handle(m); };
-  ws.onclose = () => {
-    if (N.ws !== ws) return;
-    N.online = false; render();
-    setTimeout(connect, Math.min(5000, 500 * 2 ** N.retry++));
-  };
+// The room runs in the host's browser (js/room.js); js/p2p.js links everyone else to it over WebRTC.
+const ENDED = {
+  closed: 'El anfitrión ha cerrado la sala.',
+  gone: 'Se ha perdido la conexión con el anfitrión y la sala ya no está disponible.',
+  full: 'Esa sala está llena (8 jugadores).',
+  busy: 'Esa sala ya no admite jugadores.',
+  replaced: 'Has entrado en esta sala desde otra pestaña.',
+};
+const hooks = {
+  onmessage: m => handle(m),
+  onstatus: on => { N.online = on; if (!on) N.rtt = null; render(); },
+  onend: reason => leftRoom(ENDED[reason] || ENDED.gone),
+};
+function send(msg) { return !!(N.net && N.net.send(msg)); }
+setInterval(() => { if (N.net && !N.net.host) send({ type: 'ping', t: performance.now() }); }, 2000);
+
+async function enter(open, waiting) {
+  if (N.busy || N.net) return;
+  N.busy = true; menuSay(waiting); render();
+  try { const net = await open(rememberName() || 'Jugador'); if (!net.ended) { N.net = net; menuSay(''); } }
+  catch (e) { menuSay(e.message, 'down'); }
+  N.busy = false; render();
 }
-setInterval(() => send({ type: 'ping', t: performance.now() }), 2000);
+function leave() {
+  if (N.net) N.net.leave();
+  leftRoom('');
+}
+function leftRoom(text) {
+  Object.assign(N, { net: null, id: null, online: false, rtt: null });
+  history.replaceState(null, '', location.pathname + location.search);
+  S.room = null; resetMarket();
+  menuSay(text, 'down');
+  render();
+}
+const isHost = () => !!(N.net && N.net.host);
+const othersOnline = () => !!S.room && S.room.players.some(p => p.connected && p.id !== N.id);
 
 function handle(m) {
   switch (m.type) {
-    case 'hello': {                             // connected, but not seated anywhere
-      const had = session.get('pr-seat');
-      session.del('pr-seat'); S.room = null; resetMarket();
-      // Our seat expired while we were away: take a new one in the same room if it still exists.
-      if (had && had.code) send({ type: 'join', code: had.code, name: myName() || 'Jugador' });
-      break;
-    }
     case 'welcome':
-      N.id = m.id; session.set('pr-seat', { token: m.token, code: m.code });
-      history.replaceState(null, '', '#' + m.code);
+      N.id = m.id;
+      if (/^[A-Z]{4}$/.test(m.code)) history.replaceState(null, '', '#' + m.code);
       break;
     case 'state':
       CFG = m.cfg; S.room = m.room; S.tick = m.k; S.px = m.px; S.ph = m.ph; S.left = m.left;
@@ -404,8 +423,6 @@ function handle(m) {
     case 'reject': say(m.reason, 'down'); break;
     case 'end': S.results = m.results; S.ph = 'ended'; renderResults(); break;
     case 'lobby': S.game = null; S.results = null; S.me = null; S.rk = null; S.spectator = false; S.ph = 'lobby'; break;
-    case 'left': session.del('pr-seat'); history.replaceState(null, '', location.pathname); S.room = null; resetMarket(); break;
-    case 'error': $('#menuMsg').textContent = m.text; break;
     case 'pong': N.rtt = performance.now() - m.t; break;
   }
   render();
@@ -417,13 +434,8 @@ function resetMarket() {
 
 // ---------- actions ----------
 const myName = () => ($('#playerName').value.trim() || local.get('pr-name') || '').slice(0, 18);
-function rememberName() { const n = $('#playerName').value.trim(); if (n) local.set('pr-name', n); return n; }
-function menuAction(msg) {
-  $('#menuMsg').textContent = '';
-  if (!N.online) { $('#menuMsg').textContent = 'Sin conexión con el servidor. Reintentando…'; return; }
-  msg.name = rememberName() || 'Jugador';
-  send(msg);
-}
+function rememberName() { const n = $('#playerName').value.trim().slice(0, 18); if (n) local.set('pr-name', n); return n || myName(); }
+function menuSay(text, kind) { const m = $('#menuMsg'); m.textContent = text; m.className = 'msg ' + (kind || ''); }
 function canTrade() { return S.ph === 'live' && !S.spectator && S.me && N.online; }
 function order(side) {
   if (!S.room) return;
@@ -442,9 +454,12 @@ function render() {
   const me = S.me, p = S.px;
 
   // connection
-  const net = $('#net'); net.classList.toggle('off', !N.online);
-  $('#netTxt').textContent = N.online ? 'En línea' + (N.rtt != null ? ' · ' + Math.round(N.rtt) + ' ms' : '') : 'Reconectando…';
-  $('#offline').hidden = N.online;
+  const lost = !!N.net && !N.net.host && !N.online;
+  $('#net').className = 'net' + (!N.net ? ' idle' : lost ? ' off' : '');
+  $('#netTxt').textContent = !N.net ? (N.busy ? 'Conectando…' : 'Sin conectar') : N.net.host ? 'Eres el anfitrión'
+    : N.online ? 'En línea' + (N.rtt != null ? ' · ' + Math.round(N.rtt) + ' ms' : '') : 'Reconectando…';
+  $('#offline').hidden = !lost;
+  for (const id of ['#quickBtn', '#joinBtn', '#createBtn']) $(id).disabled = N.busy;
 
   // quote
   $('#px').textContent = p != null ? dec(p) : '—';
@@ -519,6 +534,7 @@ function render() {
   $('#results').hidden = !(inRoom && ended && S.results);
   if (inRoom && S.ph === 'lobby') renderRoomLobby();
   if (inRoom && ended && S.left != null) $('#resBack').textContent = 'Volvéis a la sala en ' + Math.ceil(secs(S.left)) + ' s. Puedes quedarte para la revancha.';
+  $('#resLeaveBtn').textContent = isHost() && othersOnline() ? 'Cerrar la sala' : 'Salir de la sala';
   drawChart();
 }
 
@@ -567,6 +583,8 @@ function renderRoomLobby() {
   $('#hostRow').hidden = !(R.private && mine.host);
   if (document.activeElement !== $('#roomMins')) $('#roomMins').value = String(R.mins);
   const rb = $('#readyBtn'); rb.setAttribute('aria-pressed', String(!!mine.ready)); rb.textContent = mine.ready ? 'Listo ✓' : 'Estoy listo';
+  $('#hostNote').hidden = !mine.host;
+  $('#leaveBtn').textContent = mine.host && othersOnline() ? 'Cerrar la sala' : 'Salir';
 }
 
 function renderTape() {
@@ -688,19 +706,19 @@ function drawChart() {
 (function init() {
   const nm = local.get('pr-name'); if (nm) $('#playerName').value = nm;
   const h = location.hash.slice(1).toUpperCase(); if (/^[A-Z]{4}$/.test(h)) $('#joinCode').value = h;
-  $('#menuForm').addEventListener('submit', e => { e.preventDefault(); menuAction({ type: 'quick' }); });
-  $('#createBtn').addEventListener('click', () => menuAction({ type: 'create', mins: 5 }));
+  $('#menuForm').addEventListener('submit', e => { e.preventDefault(); enter(name => quickMatch(name, hooks), 'Buscando una sala pública…'); });
+  $('#createBtn').addEventListener('click', () => enter(name => createRoom(name, 5, hooks), 'Abriendo tu sala…'));
   $('#joinBtn').addEventListener('click', () => {
     const code = $('#joinCode').value.trim().toUpperCase();
-    if (!/^[A-Z]{4}$/.test(code)) { $('#menuMsg').textContent = 'El código tiene 4 letras, por ejemplo KQBT.'; return; }
-    menuAction({ type: 'join', code });
+    if (!/^[A-Z]{4}$/.test(code)) { menuSay('El código tiene 4 letras, por ejemplo KQBT.', 'down'); return; }
+    enter(name => joinRoom(code, { name }, hooks), 'Conectando con la sala ' + code + '…');
   });
   $('#joinCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#joinBtn').click(); } });
   $('#readyBtn').addEventListener('click', () => { const mine = S.room && S.room.players.find(p => p.id === N.id); send({ type: 'ready', ready: !(mine && mine.ready) }); });
   $('#hostStartBtn').addEventListener('click', () => send({ type: 'start' }));
   $('#roomMins').addEventListener('change', e => send({ type: 'config', mins: +e.target.value }));
-  $('#leaveBtn').addEventListener('click', () => send({ type: 'leave' }));
-  $('#resLeaveBtn').addEventListener('click', () => send({ type: 'leave' }));
+  $('#leaveBtn').addEventListener('click', leave);
+  $('#resLeaveBtn').addEventListener('click', leave);
   $('#copyBtn').addEventListener('click', () => {
     const link = location.origin + location.pathname + '#' + S.room.code, b = $('#copyBtn');
     const done = ok => { b.textContent = ok ? 'Enlace copiado' : link; setTimeout(() => { b.textContent = 'Copiar enlace'; }, 2500); };
@@ -720,9 +738,12 @@ function drawChart() {
     else return;
     e.preventDefault();
   });
+  // Closing the tab of a room you host ends the game for everyone else in it.
+  addEventListener('beforeunload', e => { if (isHost() && S.ph === 'live' && othersOnline()) { e.preventDefault(); e.returnValue = ''; } });
   new ResizeObserver(drawChart).observe($('.chart-wrap'));
   render();
-  connect();
+  const back = resume(myName() || 'Jugador', hooks);      // after a reload, go back to the room this tab was in
+  if (back) enter(() => back, 'Volviendo a la sala…');
 })();
 </script>
 </body>

@@ -1,6 +1,7 @@
-// One room = one market + up to 8 human players. The room owns the clock:
-// it advances the market every 200 ms and broadcasts one compact update per tick.
-import crypto from 'node:crypto';
+// One room = one market + up to 8 human players, run inside the host's browser.
+// The room owns the clock: it advances the market every 200 ms and sends one compact update per tick.
+// Players reach it through a `conn` ({ send(text), close() }): a WebRTC data channel for guests,
+// a direct hand-off inside the page for the host (conn.local).
 import { Market, CFG, BOT_DEFS, makeTrader, lobbyBots, rint } from './market.js';
 
 const SIZES = new Set([0.25, 0.5, 1]);
@@ -12,6 +13,23 @@ export const MAX_HUMANS = CFG.tableSize;
 const r2 = n => Math.round(n * 100) / 100;
 const candleOut = c => ({ i: c.i, o: r2(c.o), h: r2(c.h), l: r2(c.l), c: r2(c.c), bv: Math.round(c.bv), sv: Math.round(c.sv) });
 const evOut = e => e.type === 'trade' ? { ...e, notional: Math.round(e.notional), px: r2(e.px) } : e;
+const hex = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
+export const cleanName = n => String(n ?? '').replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, 18) || 'Jugador';
+
+// Hidden tabs throttle setInterval to once a second, but timers inside a worker keep their pace,
+// so the host can switch tabs without the game stuttering for everyone else.
+function ticker(fn, ms) {
+  try {
+    const url = URL.createObjectURL(new Blob([`setInterval(() => postMessage(0), ${ms})`], { type: 'text/javascript' }));
+    const w = new Worker(url);
+    URL.revokeObjectURL(url);
+    w.onmessage = fn;
+    return () => w.terminate();
+  } catch (e) {
+    const t = setInterval(fn, ms);
+    return () => clearInterval(t);
+  }
+}
 
 export class Room {
   constructor({ code, isPrivate, mins = 5 }) {
@@ -28,71 +46,80 @@ export class Room {
     this.backAt = 0;
     this.tape = [];                    // recent public events, for players who join mid-way
     this.sentCandle = 0;
-    this.emptySince = Date.now();
     for (let i = 0; i < 30 * CFG.candleTicks; i++) this.market.step(this.traders);   // pre-market history
     this.market.events = [];
     this.sentCandle = this.market.cur().i;
     this.last = performance.now(); this.acc = 0;
-    this.timer = setInterval(() => this.loop(), 50);
+    this.stopClock = ticker(() => this.loop(), 50);
   }
 
   // ---------- membership ----------
   humans() { return [...this.players.values()]; }
   connected() { return this.humans().filter(p => p.connected); }
-  hasToken(token) { return this.players.has(token); }
   isFull() { return this.players.size >= MAX_HUMANS; }
-  isDead() { return this.connected().length === 0 && Date.now() - this.emptySince > 60000; }
 
-  addPlayer(ws, name, token) {
+  join(conn, msg) {
+    if (conn.player) return;
+    const name = cleanName(msg.name);
+    if (typeof msg.token === 'string' && this.players.has(msg.token)) return this.addPlayer(conn, name, msg.token);
+    // Quick match only fills public rooms that are still waiting for the bell; the guest then tries the next one.
+    if (msg.quick && (this.isPrivate || this.phase !== 'lobby' || this.isFull())) return this.send({ conn }, { type: 'error', code: 'busy' });
+    if (this.isFull()) return this.send({ conn }, { type: 'error', code: 'full', text: 'Esa sala está llena (8 jugadores).' });
+    this.addPlayer(conn, name);
+  }
+
+  addPlayer(conn, name, token) {
     let p = token && this.players.get(token);
     if (p) {                                   // reconnect: same seat, same position
-      if (p.ws && p.ws !== ws) p.ws.close(4000, 'replaced');
-      p.ws = ws; p.connected = true; p.goneAt = null;
+      // The same seat opened in another tab: the old one stops instead of reclaiming it.
+      if (p.conn && p.conn !== conn) { this.send(p, { type: 'replaced' }); p.conn.player = null; p.conn.close(); }
+      p.conn = conn; p.connected = true; p.goneAt = null;
     } else {
       const taken = new Set(this.humans().map(h => h.name));
       let nm = name, k = 2;
       while (taken.has(nm)) nm = `${name} (${k++})`;
       p = {
-        id: 'p' + crypto.randomBytes(4).toString('hex'),
-        token: crypto.randomBytes(16).toString('hex'),
-        name: nm, ws, connected: true, ready: false,
-        host: this.isPrivate && this.players.size === 0,
+        id: 'p' + hex(4), token: hex(16),
+        name: nm, conn, connected: true, ready: false,
+        host: !!conn.local,                    // the player whose browser runs the room
         spectator: this.phase !== 'lobby',
         trader: null, sentVer: -1, bucket: { tokens: 5, at: Date.now() },
       };
       this.players.set(p.token, p);
     }
-    ws.room = this; ws.player = p;
+    conn.player = p;
     if (this.phase === 'lobby' && !this.isPrivate && this.countdown === null) this.countdown = this.market.tick + LOBBY_WAIT;
     if (this.phase === 'lobby' && this.players.size >= MAX_HUMANS) this.shortenCountdown(25);
-    this.send(p, { type: 'welcome', id: p.id, token: p.token, code: this.code });
+    this.send(p, { type: 'welcome', id: p.id, token: p.token, code: this.code, host: p.host });
     this.send(p, this.snapshot(p));
     this.broadcastRoster();
   }
 
-  removePlayer(ws, leaving) {
-    const p = ws.player; if (!p || p.ws !== ws) return;
-    ws.room = null; ws.player = null;
-    p.connected = false; p.ws = null;
+  removePlayer(conn, leaving) {
+    const p = conn.player; if (!p || p.conn !== conn) return;
+    conn.player = null;
+    p.connected = false; p.conn = null;
     // Players in a running game keep their seat (and their position) until it ends.
     // Anyone else gets a short grace period to reconnect (e.g. a page reload).
     if (leaving) this.players.delete(p.token);
     else if (!p.trader) p.goneAt = Date.now();
-    this.fixHost();
-    if (this.connected().length === 0) { this.emptySince = Date.now(); if (this.phase === 'lobby') this.countdown = null; }
     this.broadcastRoster();
   }
 
-  fixHost() {
-    if (!this.isPrivate) return;
-    const hs = this.humans();
-    if (hs.some(h => h.host && h.connected)) return;
-    for (const h of hs) h.host = false;
-    const next = hs.find(h => h.connected);
-    if (next) next.host = true;
+  // ---------- player actions ----------
+  receive(conn, msg) {
+    const p = conn.player;
+    switch (msg.type) {
+      case 'join': this.join(conn, msg); break;
+      case 'leave': this.removePlayer(conn, true); break;
+      case 'ready': if (p) this.setReady(p, msg.ready); break;
+      case 'start': if (p) this.hostStart(p); break;
+      case 'config': if (p) this.configure(p, msg.mins); break;
+      case 'order': if (p) this.order(p, msg); break;
+      case 'ping': this.send({ conn }, { type: 'pong', t: msg.t }); break;
+    }
   }
 
-  // ---------- player actions ----------
   setReady(p, ready) {
     if (this.phase !== 'lobby') return;
     p.ready = !!ready;
@@ -101,12 +128,12 @@ export class Room {
     this.broadcastRoster();
   }
   hostStart(p) {
-    if (this.phase !== 'lobby' || !p.host) return;
+    if (this.phase !== 'lobby' || !p.host || !this.isPrivate) return;
     this.shortenCountdown(QUICK_START);
     this.broadcastRoster();
   }
   configure(p, mins) {
-    if (this.phase !== 'lobby' || !p.host || ![1, 3, 5].includes(mins)) return;
+    if (this.phase !== 'lobby' || !p.host || !this.isPrivate || ![1, 3, 5].includes(mins)) return;
     this.mins = mins;
     this.broadcastRoster();
   }
@@ -173,7 +200,6 @@ export class Room {
   toLobby() {
     for (const p of [...this.players.values()]) if (!p.connected) this.players.delete(p.token);
     for (const p of this.players.values()) { p.trader = null; p.spectator = false; p.ready = false; }
-    this.fixHost();
     this.traders = lobbyBots();
     this.game = null; this.results = null; this.phase = 'lobby';
     this.countdown = !this.isPrivate && this.connected().length ? this.market.tick + LOBBY_WAIT : null;
@@ -196,7 +222,7 @@ export class Room {
     for (const p of [...this.players.values()]) {
       if (!p.connected && !p.trader && p.goneAt && Date.now() - p.goneAt > 10000) { this.players.delete(p.token); changed = true; }
     }
-    if (changed) { this.fixHost(); this.broadcastRoster(); }
+    if (changed) this.broadcastRoster();
   }
 
   step() {
@@ -259,12 +285,18 @@ export class Room {
     };
   }
 
-  send(p, msg) { if (p.ws && p.ws.readyState === 1) p.ws.send(JSON.stringify(msg)); }
+  send(p, msg) { if (p.conn) p.conn.send(JSON.stringify(msg)); }
   broadcast(msg) {
     const s = JSON.stringify(msg);
-    for (const p of this.players.values()) if (p.ws && p.ws.readyState === 1) p.ws.send(s);
+    for (const p of this.players.values()) if (p.conn) p.conn.send(s);
   }
   broadcastRoster() { this.broadcast(this.roster()); }
 
-  destroy() { clearInterval(this.timer); }
+  // The host is leaving: tell everyone the room is gone and stop the clock.
+  close() {
+    this.stopClock();
+    const s = JSON.stringify({ type: 'closed' });
+    for (const p of this.players.values()) if (p.conn && !p.conn.local) p.conn.send(s);
+    this.players.clear();
+  }
 }
